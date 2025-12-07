@@ -31,18 +31,19 @@
 
 namespace rings {
 
-const int32_t kNumChords = 11;
+const int32_t kNumChords = 11;  // Number of chord types available for quantized sympathetic strings
 
+// Performance state: Contains performance and note information for audio processing
 struct PerformanceState {
-  bool strum;
-  bool internal_exciter;
-  bool internal_strum;
-  bool internal_note;
+  bool strum;              // Strum trigger flag (edge-triggered)
+  bool internal_exciter;   // Use internal exciter (pulse/noise burst) if no audio input
+  bool internal_strum;     // Use internal strum detection if no strum input
+  bool internal_note;      // Use internal note generation if no pitch input
 
-  float tonic;
-  float note;
-  float fm;
-  int32_t chord;
+  float tonic;             // Base frequency in MIDI note format (12.0 = C0)
+  float note;              // Current note in MIDI note format (12 semitones per octave)
+  float fm;                // Frequency modulation amount in semitones (±48 semitones range)
+  int32_t chord;           // Chord index (0-10) for quantized sympathetic strings mode
 };
 
 }  // namespace rings

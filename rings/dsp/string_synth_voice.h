@@ -35,38 +35,45 @@
 
 namespace rings {
 
+// StringSynthVoice: Template-based string synth voice with multiple harmonics
+// Each voice consists of multiple oscillators (harmonics) that are summed together
 template<size_t num_harmonics>
 class StringSynthVoice {
  public:
   StringSynthVoice() { }
   ~StringSynthVoice() { }
   
+  // Initialize voice: Set up all harmonic oscillators
   void Init() {
     for (size_t i = 0; i < num_harmonics; ++i) {
-      oscillator_[i].Init();
+      oscillator_[i].Init();  // Initialize each harmonic oscillator
     }
   }
   
+  // Render voice: Generate audio from multiple harmonics
   void Render(
-      float frequency,
-      const float* amplitudes,
-      size_t summed_harmonics,
-      float* out,
-      size_t size) {
+      float frequency,              // Fundamental frequency (normalized)
+      const float* amplitudes,      // Harmonic amplitudes (2 per harmonic: odd/even)
+      size_t summed_harmonics,      // Number of harmonics to sum
+      float* out,                   // Output buffer
+      size_t size) {                // Block size
+    // Fundamental: Dark square wave (additive synthesis)
     oscillator_[0].template Render<OSCILLATOR_SHAPE_DARK_SQUARE, true>(
         frequency, amplitudes[0], amplitudes[1], out, size);
-    amplitudes += 2;
+    amplitudes += 2;  // Move to next harmonic amplitudes
     
+    // Harmonics: Bright square waves at multiples of fundamental
     for (size_t i = 1; i < summed_harmonics; ++i) {
-      frequency *= 2.0f;
+      frequency *= 2.0f;  // Double frequency for each harmonic (2x, 4x, 8x, ...)
+      // Bright square wave (additive synthesis, accumulates to output)
       oscillator_[i].template Render<OSCILLATOR_SHAPE_BRIGHT_SQUARE, false>(
           frequency, amplitudes[0], amplitudes[1], out, size);
-      amplitudes += 2;
+      amplitudes += 2;  // Move to next harmonic amplitudes
     }
   }
 
  private:
-  StringSynthOscillator oscillator_[num_harmonics];
+  StringSynthOscillator oscillator_[num_harmonics];  // Harmonic oscillators (typically 3)
   DISALLOW_COPY_AND_ASSIGN(StringSynthVoice);
 };
 

@@ -139,42 +139,48 @@ class Reverb {
     lp_decay_2_ = lp_2;
   }
   
+  // Set reverb amount: Wet/dry mix (0.0 = dry, 1.0 = wet)
   inline void set_amount(float amount) {
     amount_ = amount;
   }
   
+  // Set input gain: Input signal gain before reverb
   inline void set_input_gain(float input_gain) {
     input_gain_ = input_gain;
   }
 
+  // Set reverb time: Decay time (RT60)
   inline void set_time(float reverb_time) {
     reverb_time_ = reverb_time;
   }
   
+  // Set diffusion: Allpass feedback coefficient (0.0-1.0)
   inline void set_diffusion(float diffusion) {
     diffusion_ = diffusion;
   }
   
+  // Set low-pass cutoff: High-frequency damping (0.0-1.0)
   inline void set_lp(float lp) {
     lp_ = lp;
   }
   
+  // Clear reverb: Reset all delay lines to zero
   inline void Clear() {
     engine_.Clear();
   }
   
  private:
-  typedef FxEngine<32768, FORMAT_16_BIT> E;
+  typedef FxEngine<32768, FORMAT_16_BIT> E;  // FX engine: 32KB buffer, 16-bit format
   E engine_;
   
-  float amount_;
-  float input_gain_;
-  float reverb_time_;
-  float diffusion_;
-  float lp_;
+  float amount_;        // Wet/dry mix amount
+  float input_gain_;    // Input gain
+  float reverb_time_;   // Reverb time (decay)
+  float diffusion_;    // Diffusion (allpass feedback)
+  float lp_;            // Low-pass filter cutoff
   
-  float lp_decay_1_;
-  float lp_decay_2_;
+  float lp_decay_1_;    // Low-pass filter state for delay loop 1
+  float lp_decay_2_;    // Low-pass filter state for delay loop 2
   
   DISALLOW_COPY_AND_ASSIGN(Reverb);
 };

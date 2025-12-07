@@ -38,93 +38,106 @@
 
 namespace rings {
 
+// Ensemble: Multi-voice ensemble effect with 3 detuned voices
+// Creates multiple pitch-shifted copies with different LFO phases
 class Ensemble {
  public:
   Ensemble() { }
   ~Ensemble() { }
   
+  // Initialize ensemble: Set up FX engine and LFO phases
   void Init(uint16_t* buffer) {
-    engine_.Init(buffer);
-    phase_1_ = 0;
-    phase_2_ = 0;
+    engine_.Init(buffer);  // Initialize FX engine with shared buffer
+    phase_1_ = 0;          // Reset slow LFO phase
+    phase_2_ = 0;          // Reset fast LFO phase
   }
   
+  // Process ensemble: Apply multi-voice ensemble effect
   void Process(float* left, float* right, size_t size) {
-    typedef E::Reserve<2047, E::Reserve<2047> > Memory;
-    E::DelayLine<Memory, 0> line_l;
-    E::DelayLine<Memory, 1> line_r;
-    E::Context c;
+    // Two delay lines: One for left, one for right channel
+    typedef E::Reserve<2047, E::Reserve<2047> > Memory;  // 2 delay lines, 2047 samples each
+    E::DelayLine<Memory, 0> line_l;  // Left channel delay line
+    E::DelayLine<Memory, 1> line_r;  // Right channel delay line
+    E::Context c;                     // FX engine context
     
     while (size--) {
       engine_.Start(&c);
+      // Dry amount: Reduce dry signal as amount increases (max 50% reduction)
       float dry_amount = 1.0f - amount_ * 0.5f;
     
-      // Update LFO.
-      phase_1_ += 1.57e-05f;
+      // Update LFOs: Two LFOs at different rates (slow and fast)
+      phase_1_ += 1.57e-05f;  // Slow LFO: ~0.75 Hz
       if (phase_1_ >= 1.0f) {
-        phase_1_ -= 1.0f;
+        phase_1_ -= 1.0f;  // Wrap phase
       }
-      phase_2_ += 1.37e-04f;
+      phase_2_ += 1.37e-04f;  // Fast LFO: ~6.6 Hz
       if (phase_2_ >= 1.0f) {
-        phase_2_ -= 1.0f;
+        phase_2_ -= 1.0f;  // Wrap phase
       }
-      int32_t phi_1 = (phase_1_ * 4096.0f);
-      float slow_0 = lut_sine[phi_1 & 4095];
-      float slow_120 = lut_sine[(phi_1 + 1365) & 4095];
-      float slow_240 = lut_sine[(phi_1 + 2730) & 4095];
-      int32_t phi_2 = (phase_2_ * 4096.0f);
-      float fast_0 = lut_sine[phi_2 & 4095];
-      float fast_120 = lut_sine[(phi_2 + 1365) & 4095];
-      float fast_240 = lut_sine[(phi_2 + 2730) & 4095];
+      // Generate 3-phase LFOs: 0°, 120°, 240° (for 3 voices)
+      int32_t phi_1 = (phase_1_ * 4096.0f);  // Slow LFO phase (integer)
+      float slow_0 = lut_sine[phi_1 & 4095];        // Slow LFO: 0°
+      float slow_120 = lut_sine[(phi_1 + 1365) & 4095];   // Slow LFO: 120° (1365 = 4096/3)
+      float slow_240 = lut_sine[(phi_1 + 2730) & 4095];   // Slow LFO: 240° (2730 = 4096*2/3)
+      int32_t phi_2 = (phase_2_ * 4096.0f);  // Fast LFO phase (integer)
+      float fast_0 = lut_sine[phi_2 & 4095];        // Fast LFO: 0°
+      float fast_120 = lut_sine[(phi_2 + 1365) & 4095];   // Fast LFO: 120°
+      float fast_240 = lut_sine[(phi_2 + 2730) & 4095];   // Fast LFO: 240°
       
-      float a = depth_ * 1.0f;
-      float b = depth_ * 0.1f;
+      // Modulation amounts: Slow LFO (main) + fast LFO (vibrato)
+      float a = depth_ * 1.0f;   // Slow LFO amplitude
+      float b = depth_ * 0.1f;   // Fast LFO amplitude (10% of slow)
       
-      float mod_1 = slow_0 * a + fast_0 * b;
-      float mod_2 = slow_120 * a + fast_120 * b;
-      float mod_3 = slow_240 * a + fast_240 * b;
+      // Combine slow and fast LFOs: Creates 3 detuned voices
+      float mod_1 = slow_0 * a + fast_0 * b;      // Voice 1 modulation
+      float mod_2 = slow_120 * a + fast_120 * b;  // Voice 2 modulation
+      float mod_3 = slow_240 * a + fast_240 * b;  // Voice 3 modulation
     
-      float wet = 0.0f;
+      float wet = 0.0f;  // Wet signal output
     
-      // Sum L & R channel to send to chorus line.
-      c.Read(*left, 1.0f);
-      c.Write(line_l, 0.0f);
-      c.Read(*right, 1.0f);
-      c.Write(line_r, 0.0f);
+      // Write input to delay lines: Separate left and right channels
+      c.Read(*left, 1.0f);   // Read left channel (100%)
+      c.Write(line_l, 0.0f); // Write to left delay line
+      c.Read(*right, 1.0f);  // Read right channel (100%)
+      c.Write(line_r, 0.0f); // Write to right delay line
     
-      c.Interpolate(line_l, mod_1 + 1024, 0.33f);
-      c.Interpolate(line_l, mod_2 + 1024, 0.33f);
-      c.Interpolate(line_r, mod_3 + 1024, 0.33f);
-      c.Write(wet, 0.0f);
-      *left = wet * amount_ + *left * dry_amount;
+      // Left channel: Mix 3 voices from delay lines
+      c.Interpolate(line_l, mod_1 + 1024, 0.33f);  // Voice 1: mod_1 + center delay
+      c.Interpolate(line_l, mod_2 + 1024, 0.33f);  // Voice 2: mod_2 + center delay
+      c.Interpolate(line_r, mod_3 + 1024, 0.33f);  // Voice 3: mod_3 + center delay (from right line)
+      c.Write(wet, 0.0f);                          // Sum voices
+      *left = wet * amount_ + *left * dry_amount;  // Mix wet and dry
       
-      c.Interpolate(line_r, mod_1 + 1024, 0.33f);
-      c.Interpolate(line_r, mod_2 + 1024, 0.33f);
-      c.Interpolate(line_l, mod_3 + 1024, 0.33f);
-      c.Write(wet, 0.0f);
-      *right = wet * amount_ + *right * dry_amount;
+      // Right channel: Mix 3 voices with different routing
+      c.Interpolate(line_r, mod_1 + 1024, 0.33f);  // Voice 1: mod_1 + center delay
+      c.Interpolate(line_r, mod_2 + 1024, 0.33f);  // Voice 2: mod_2 + center delay
+      c.Interpolate(line_l, mod_3 + 1024, 0.33f);  // Voice 3: mod_3 + center delay (from left line)
+      c.Write(wet, 0.0f);                          // Sum voices
+      *right = wet * amount_ + *right * dry_amount; // Mix wet and dry
       left++;
       right++;
     }
   }
   
+  // Set ensemble amount: Wet/dry mix (0.0 = dry, 1.0 = wet)
   inline void set_amount(float amount) {
     amount_ = amount;
   }
   
+  // Set ensemble depth: Modulation depth (scaled to samples)
   inline void set_depth(float depth) {
-    depth_ = depth * 128.0f;
+    depth_ = depth * 128.0f;  // Scale: 0.0-1.0 -> 0-128 samples
   }
   
  private:
-  typedef FxEngine<4096, FORMAT_16_BIT> E;
+  typedef FxEngine<4096, FORMAT_16_BIT> E;  // FX engine: 4KB buffer, 16-bit format
   E engine_;
   
-  float amount_;
-  float depth_;
+  float amount_;  // Wet/dry mix amount
+  float depth_;   // Modulation depth (in samples)
   
-  float phase_1_;
-  float phase_2_;
+  float phase_1_;  // Slow LFO phase accumulator
+  float phase_2_;  // Fast LFO phase accumulator
   
   DISALLOW_COPY_AND_ASSIGN(Ensemble);
 };

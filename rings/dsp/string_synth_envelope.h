@@ -33,108 +33,125 @@
 
 namespace rings {
 
+// Envelope shapes: Curve shapes for envelope segments
 enum EnvelopeShape {
-  ENVELOPE_SHAPE_LINEAR,
-  ENVELOPE_SHAPE_QUARTIC
+  ENVELOPE_SHAPE_LINEAR,   // Linear interpolation
+  ENVELOPE_SHAPE_QUARTIC   // Quartic curve (smooth S-curve)
 };
 
+// Envelope flags: Control envelope behavior
 enum EnvelopeFlags {
-  ENVELOPE_FLAG_RISING_EDGE = 1,
-  ENVELOPE_FLAG_FALLING_EDGE = 2,
-  ENVELOPE_FLAG_GATE = 4
+  ENVELOPE_FLAG_RISING_EDGE = 1,   // Trigger attack (rising edge)
+  ENVELOPE_FLAG_FALLING_EDGE = 2,  // Trigger release (falling edge)
+  ENVELOPE_FLAG_GATE = 4           // Gate signal (sustain)
 };
 
+// StringSynthEnvelope: AD/AR envelope for string synth voices
+// Multi-segment envelope with configurable shapes and sustain point
 class StringSynthEnvelope {
  public:
   StringSynthEnvelope() { }
   ~StringSynthEnvelope() { }
   
+  // Initialize envelope: Set default AD envelope
   void Init() {
-    set_ad(0.1f, 0.001f);
-    segment_ = num_segments_;
-    phase_ = 0.0f;
-    start_value_ = 0.0f;
-    value_ = 0.0f;
+    set_ad(0.1f, 0.001f);  // Default: 0.1 attack, 0.001 decay
+    segment_ = num_segments_;  // Set to end (inactive)
+    phase_ = 0.0f;             // Reset phase
+    start_value_ = 0.0f;        // Reset start value
+    value_ = 0.0f;              // Reset output value
   }
 
+  // Process envelope: Update envelope value based on flags
   inline float Process(uint8_t flags) {
+    // Rising edge: Start attack segment
     if (flags & ENVELOPE_FLAG_RISING_EDGE) {
-      start_value_ = segment_ == num_segments_ ? level_[0] : value_;
-      segment_ = 0;
-      phase_ = 0.0f;
+      start_value_ = segment_ == num_segments_ ? level_[0] : value_;  // Start from current or zero
+      segment_ = 0;      // Go to attack segment
+      phase_ = 0.0f;     // Reset phase
     } else if (flags & ENVELOPE_FLAG_FALLING_EDGE && sustain_point_) {
-      start_value_ = value_;
-      segment_ = sustain_point_;
-      phase_ = 0.0f;
+      // Falling edge: Start release segment (if sustain point exists)
+      start_value_ = value_;        // Start from current value
+      segment_ = sustain_point_;     // Go to sustain/release segment
+      phase_ = 0.0f;                 // Reset phase
     } else if (phase_ >= 1.0f) {
-      start_value_ = level_[segment_ + 1];
-      ++segment_;
-      phase_ = 0.0f;
+      // Segment complete: Move to next segment
+      start_value_ = level_[segment_ + 1];  // Start from end of current segment
+      ++segment_;                            // Move to next segment
+      phase_ = 0.0f;                         // Reset phase
     }
   
-    bool done = segment_ == num_segments_;
+    // Check envelope state
+    bool done = segment_ == num_segments_;  // Envelope complete
     bool sustained = sustain_point_ && segment_ == sustain_point_ &&
-        flags & ENVELOPE_FLAG_GATE;
+        flags & ENVELOPE_FLAG_GATE;  // Sustaining (gate held)
   
+    // Update phase: Only if not sustained and not done
     float phase_increment = 0.0f;
     if (!sustained && !done) {
-      phase_increment = rate_[segment_];
-    }
-    float t = phase_;
-    if (shape_[segment_] == ENVELOPE_SHAPE_QUARTIC) {
-      t = 1.0f - t;
-      t *= t;
-      t *= t;
-      t = 1.0f - t;
+      phase_increment = rate_[segment_];  // Get rate for current segment
     }
     
+    // Apply shape: Linear or quartic curve
+    float t = phase_;
+    if (shape_[segment_] == ENVELOPE_SHAPE_QUARTIC) {
+      // Quartic curve: Smooth S-curve (1 - (1-t)^4)
+      t = 1.0f - t;
+      t *= t;      // Square
+      t *= t;      // Square again (4th power)
+      t = 1.0f - t;  // Invert
+    }
+    
+    // Update phase and compute output value
     phase_ += phase_increment;
-    value_ = start_value_ + (level_[segment_ + 1] - start_value_) * t;
+    value_ = start_value_ + (level_[segment_ + 1] - start_value_) * t;  // Linear interpolation
     return value_;
   }
 
+  // Set AD envelope: Attack-Decay envelope (no sustain)
   inline void set_ad(float attack, float decay) {
-    num_segments_ = 2;
-    sustain_point_ = 0;
+    num_segments_ = 2;      // Two segments: attack and decay
+    sustain_point_ = 0;     // No sustain point
 
-    level_[0] = 0.0f;
-    level_[1] = 1.0f;
-    level_[2] = 0.0f;
+    level_[0] = 0.0f;       // Start level
+    level_[1] = 1.0f;       // Peak level
+    level_[2] = 0.0f;       // End level
 
-    rate_[0] = attack;
-    rate_[1] = decay;
+    rate_[0] = attack;      // Attack rate
+    rate_[1] = decay;      // Decay rate
     
-    shape_[0] = ENVELOPE_SHAPE_LINEAR;
-    shape_[1] = ENVELOPE_SHAPE_QUARTIC;
+    shape_[0] = ENVELOPE_SHAPE_LINEAR;   // Linear attack
+    shape_[1] = ENVELOPE_SHAPE_QUARTIC;  // Quartic decay (smooth)
   }
 
+  // Set AR envelope: Attack-Release envelope (with sustain)
   inline void set_ar(float attack, float decay) {
-    num_segments_ = 2;
-    sustain_point_ = 1;
+    num_segments_ = 2;      // Two segments: attack and release
+    sustain_point_ = 1;     // Sustain at segment 1
 
-    level_[0] = 0.0f;
-    level_[1] = 1.0f;
-    level_[2] = 0.0f;
+    level_[0] = 0.0f;       // Start level
+    level_[1] = 1.0f;       // Sustain level
+    level_[2] = 0.0f;       // End level
 
-    rate_[0] = attack;
-    rate_[1] = decay;
+    rate_[0] = attack;      // Attack rate
+    rate_[1] = decay;       // Release rate
     
-    shape_[0] = ENVELOPE_SHAPE_LINEAR;
-    shape_[1] = ENVELOPE_SHAPE_LINEAR;
+    shape_[0] = ENVELOPE_SHAPE_LINEAR;  // Linear attack
+    shape_[1] = ENVELOPE_SHAPE_LINEAR;   // Linear release
   }
   
  private:
-  float level_[4];
-  float rate_[4];
-  EnvelopeShape shape_[4];
+  float level_[4];           // Segment end levels (max 4 segments)
+  float rate_[4];            // Segment rates (phase increment per sample)
+  EnvelopeShape shape_[4];    // Segment shapes (linear or quartic)
   
-  int16_t segment_;
-  float start_value_;
-  float value_;
-  float phase_;
+  int16_t segment_;          // Current segment index
+  float start_value_;         // Start value of current segment
+  float value_;              // Current envelope output value
+  float phase_;              // Current phase within segment (0.0-1.0)
   
-  uint16_t num_segments_;
-  uint16_t sustain_point_;
+  uint16_t num_segments_;    // Total number of segments
+  uint16_t sustain_point_;   // Sustain segment index (0 = no sustain)
 
   DISALLOW_COPY_AND_ASSIGN(StringSynthEnvelope);
 };

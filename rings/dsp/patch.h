@@ -31,11 +31,13 @@
 
 namespace rings {
 
+// Patch parameters: Contains the four main resonator parameters
+// All parameters are normalized to 0.0-1.0 range (except structure which goes to 0.9995)
 struct Patch {
-  float structure;
-  float brightness;
-  float damping;
-  float position;
+  float structure;   // 0.0-0.9995: Inharmonicity (modal) or string intervals (sympathetic strings)
+  float brightness;  // 0.0-1.0: Spectrum brightness and richness
+  float damping;     // 0.0-0.9995: Decay time (maps to 100ms to 10s)
+  float position;    // 0.0-0.9995: Excitation point on the structure
 };
 
 }  // namespace rings

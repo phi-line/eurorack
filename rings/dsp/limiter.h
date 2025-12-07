@@ -38,40 +38,50 @@
 
 namespace rings {
 
+// Limiter: Prevents clipping and balances output levels
+// Implements peak detection with soft limiting and gain compensation
 class Limiter {
  public:
   Limiter() { }
   ~Limiter() { }
 
+  // Initialize limiter: Set initial peak level
   void Init() {
-    peak_ = 0.5f;
+    peak_ = 0.5f;  // Initial peak level (half of maximum)
   }
 
+  // Process audio: Apply limiting with peak detection and soft clipping
   void Process(
-      float* l,
-      float* r,
-      size_t size,
-      float pre_gain) {
+      float* l,          // Left channel buffer
+      float* r,          // Right channel buffer
+      size_t size,       // Block size
+      float pre_gain) {  // Pre-gain (model-specific gain compensation)
     while (size--) {
+      // Apply pre-gain: Model-specific gain compensation
       float l_pre = *l * pre_gain;
       float r_pre = *r * pre_gain;
     
-      float l_peak = fabs(l_pre);
-      float r_peak = fabs(r_pre);
-      float s_peak = fabs(r_pre - l_pre);
-
+      // Peak detection: Find maximum peak across channels and difference signal
+      float l_peak = fabs(l_pre);        // Left channel peak
+      float r_peak = fabs(r_pre);        // Right channel peak
+      float s_peak = fabs(r_pre - l_pre); // Difference signal peak (stereo width)
+      
+      // Find maximum peak: Use highest of all three
       float peak = std::max(std::max(l_peak, r_peak), s_peak);
+      // Smooth peak tracking: Fast attack (0.05), slow decay (0.00002)
       SLOPE(peak_, peak, 0.05f, 0.00002f);
 
-      // Clamp to 8Vpp, clipping softly towards 10Vpp
+      // Gain calculation: Reduce gain if peak exceeds 1.0
+      // Clamp to 8Vpp (1.0), clipping softly towards 10Vpp (1.25)
       float gain = (peak_ <= 1.0f ? 1.0f : 1.0f / peak_);
+      // Apply gain and soft limiting: 0.8 scale factor for headroom
       *l++ = stmlib::SoftLimit(l_pre * gain * 0.8f);
       *r++ = stmlib::SoftLimit(r_pre * gain * 0.8f);
     }
   }
 
  private:
-  float peak_;
+  float peak_;  // Tracked peak level (smoothed)
 
   DISALLOW_COPY_AND_ASSIGN(Limiter);
 };

@@ -39,117 +39,140 @@ namespace rings {
 
 using namespace stmlib;
 
+// Oscillator shapes: Different waveform shapes for string synth harmonics
 enum OscillatorShape {
-  OSCILLATOR_SHAPE_BRIGHT_SQUARE,
-  OSCILLATOR_SHAPE_SQUARE,
-  OSCILLATOR_SHAPE_DARK_SQUARE,
-  OSCILLATOR_SHAPE_TRIANGLE,
+  OSCILLATOR_SHAPE_BRIGHT_SQUARE,  // Bright square wave (high harmonics)
+  OSCILLATOR_SHAPE_SQUARE,         // Standard square wave
+  OSCILLATOR_SHAPE_DARK_SQUARE,    // Dark square wave (low-pass filtered)
+  OSCILLATOR_SHAPE_TRIANGLE,       // Triangle wave
 };
 
+// StringSynthOscillator: PolyBLEP oscillator for string synth synthesis
+// Uses PolyBLEP (Polynomial Band-Limited Step) algorithm to reduce aliasing
 class StringSynthOscillator {
  public:
   StringSynthOscillator() { }
   ~StringSynthOscillator() { }
 
+  // Initialize oscillator: Reset all state variables
   inline void Init() {
-    phase_ = 0.0f;
-    phase_increment_ = 0.01f;
-    filter_state_ = 0.0f;
-    high_ = false;
+    phase_ = 0.0f;              // Phase accumulator (0.0-1.0)
+    phase_increment_ = 0.01f;    // Phase increment (frequency)
+    filter_state_ = 0.0f;        // Filter state (for low-pass filtering)
+    high_ = false;               // High state flag (for square wave)
 
-    next_sample_ = 0.0f;
-    next_sample_saw_ = 0.0f;
+    next_sample_ = 0.0f;         // Next sample (for PolyBLEP)
+    next_sample_saw_ = 0.0f;     // Next sawtooth sample (for saw component)
 
-    gain_ = 0.0f;
-    gain_saw_ = 0.0f;
+    gain_ = 0.0f;                // Current gain (for interpolation)
+    gain_saw_ = 0.0f;            // Current saw gain (for interpolation)
   }
   
+  // Render oscillator: Generate waveform with PolyBLEP anti-aliasing
   template<OscillatorShape shape, bool interpolate_pitch>
   inline void Render(
-      float target_increment,
-      float target_gain,
-      float target_gain_saw,
-      float* out,
-      size_t size) {
-    // Cut harmonics above 12kHz, and low-pass harmonics above 8kHz to clear
-    // highs
+      float target_increment,    // Target phase increment (frequency)
+      float target_gain,          // Target gain (for square component)
+      float target_gain_saw,      // Target gain (for saw component)
+      float* out,                 // Output buffer (accumulates)
+      size_t size) {              // Block size
+    // High frequency rolloff: Cut harmonics above 12kHz, low-pass above 8kHz
+    // Prevents aliasing for very high frequencies
     if (target_increment >= 0.17f) {
-      target_gain *= 1.0f - (target_increment - 0.17f) * 12.5f;
+      target_gain *= 1.0f - (target_increment - 0.17f) * 12.5f;  // Rolloff
       if (target_increment >= 0.25f) {
-        return;
+        return;  // Skip rendering if too high (above Nyquist)
       }
     }
+    
+    // Initialize state and interpolators
     float phase = phase_;
     ParameterInterpolator phase_increment(
         &phase_increment_,
         target_increment,
-        size);
-    ParameterInterpolator gain(&gain_, target_gain, size);
-    ParameterInterpolator gain_saw(&gain_saw_, target_gain_saw, size);
+        size);  // Smooth frequency changes
+    ParameterInterpolator gain(&gain_, target_gain, size);        // Smooth gain changes
+    ParameterInterpolator gain_saw(&gain_saw_, target_gain_saw, size);  // Smooth saw gain
 
-    float next_sample = next_sample_;
-    float next_sample_saw = next_sample_saw_;
-    float filter_state = filter_state_;
-    bool high = high_;
+    float next_sample = next_sample_;         // Next sample (for PolyBLEP)
+    float next_sample_saw = next_sample_saw_; // Next saw sample
+    float filter_state = filter_state_;       // Filter state
+    bool high = high_;                        // High state flag
 
+    // Main rendering loop
     while (size--) {
+      // Get current samples (from previous iteration)
       float this_sample = next_sample;
       float this_sample_saw = next_sample_saw;
       next_sample = 0.0f;
       next_sample_saw = 0.0f;
 
+      // Update phase: Use interpolated or direct increment
       float increment = interpolate_pitch
-          ? phase_increment.Next()
-          : target_increment;
+          ? phase_increment.Next()  // Smooth pitch changes
+          : target_increment;       // Direct frequency
       phase += increment;
     
       float sample = 0.0f;
-      const float pw = 0.5f;
+      const float pw = 0.5f;  // Pulse width (50% duty cycle)
 
+      // PolyBLEP correction: Square wave rising edge (at pulse width)
       if (!high && phase >= pw) {
-        float t = (phase - pw) / increment;
-        this_sample += ThisBlepSample(t);
-        next_sample += NextBlepSample(t);
-        high = true;
+        float t = (phase - pw) / increment;  // Fractional time
+        this_sample += ThisBlepSample(t);    // Add BLEP to current sample
+        next_sample += NextBlepSample(t);     // Add BLEP to next sample
+        high = true;                          // Set high state
       }
+      // PolyBLEP correction: Falling edge (at phase wrap)
       if (phase >= 1.0f) {
-        phase -= 1.0f;
-        float t = phase / increment;
-        float a = ThisBlepSample(t);
-        float b = NextBlepSample(t);
+        phase -= 1.0f;  // Wrap phase
+        float t = phase / increment;  // Fractional time
+        float a = ThisBlepSample(t);  // Current BLEP
+        float b = NextBlepSample(t);  // Next BLEP
+        // Subtract BLEP from square wave
         this_sample -= a;
         next_sample -= b;
+        // Subtract BLEP from sawtooth wave
         this_sample_saw -= a;
         next_sample_saw -= b;
-        high = false;
+        high = false;  // Clear high state
       }
       
-      next_sample += phase < pw ? 0.0f : 1.0f;
-      next_sample_saw += phase;
+      // Generate raw waveforms: Square and sawtooth
+      next_sample += phase < pw ? 0.0f : 1.0f;  // Square wave (0 or 1)
+      next_sample_saw += phase;                 // Sawtooth wave (0 to 1)
       
+      // Shape waveform: Apply filtering based on shape type
       if (shape == OSCILLATOR_SHAPE_TRIANGLE) {
+        // Triangle wave: Integrate square wave with low-pass filter
         const float integrator_coefficient = increment * 0.125f;
-        this_sample = 64.0f * (this_sample - 0.5f);
-        filter_state += integrator_coefficient * (this_sample - filter_state);
+        this_sample = 64.0f * (this_sample - 0.5f);  // Scale and center
+        filter_state += integrator_coefficient * (this_sample - filter_state);  // Integrate
         sample = filter_state;
       } else if (shape == OSCILLATOR_SHAPE_DARK_SQUARE) {
+        // Dark square: Heavy low-pass filtering
         const float integrator_coefficient = increment * 2.0f;
-        this_sample = 4.0f * (this_sample - 0.5f);
-        filter_state += integrator_coefficient * (this_sample - filter_state);
+        this_sample = 4.0f * (this_sample - 0.5f);  // Scale and center
+        filter_state += integrator_coefficient * (this_sample - filter_state);  // Low-pass
         sample = filter_state;
       } else if (shape == OSCILLATOR_SHAPE_BRIGHT_SQUARE) {
+        // Bright square: High-pass filtering (removes DC, keeps high frequencies)
         const float integrator_coefficient = increment * 2.0f;
-        this_sample = 2.0f * this_sample - 1.0f;
-        filter_state += integrator_coefficient * (this_sample - filter_state);
-        sample = (this_sample - filter_state) * 0.5f;
+        this_sample = 2.0f * this_sample - 1.0f;  // Scale to -1 to 1
+        filter_state += integrator_coefficient * (this_sample - filter_state);  // Low-pass
+        sample = (this_sample - filter_state) * 0.5f;  // High-pass (difference)
       } else {
-        this_sample = 2.0f * this_sample - 1.0f;
+        // Standard square: No filtering
+        this_sample = 2.0f * this_sample - 1.0f;  // Scale to -1 to 1
         sample = this_sample;
       }
+      // Scale sawtooth: -1 to 1
       this_sample_saw = 2.0f * this_sample_saw - 1.0f;
       
+      // Mix outputs: Square component + saw component
       *out++ += sample * gain.Next() + this_sample_saw * gain_saw.Next();
     }
+    // Store state for next call
     high_ = high;
     phase_ = phase;
     next_sample_ = next_sample;
@@ -158,22 +181,26 @@ class StringSynthOscillator {
   }
 
  private:
+  // PolyBLEP functions: Generate band-limited step correction samples
+  // ThisBlepSample: Current sample BLEP correction (quadratic polynomial)
   static inline float ThisBlepSample(float t) {
-    return 0.5f * t * t;
+    return 0.5f * t * t;  // Quadratic: 0.5 * t^2
   }
+  // NextBlepSample: Next sample BLEP correction (inverted quadratic)
   static inline float NextBlepSample(float t) {
-    t = 1.0f - t;
-    return -0.5f * t * t;
+    t = 1.0f - t;         // Invert time
+    return -0.5f * t * t; // Negative quadratic: -0.5 * (1-t)^2
   }
 
-  bool high_;
-  float phase_;
-  float phase_increment_;
-  float next_sample_;
-  float next_sample_saw_;
-  float filter_state_;
-  float gain_;
-  float gain_saw_;
+  // State variables
+  bool high_;              // High state flag (for square wave)
+  float phase_;            // Phase accumulator (0.0-1.0)
+  float phase_increment_;  // Phase increment (frequency)
+  float next_sample_;      // Next sample (for PolyBLEP)
+  float next_sample_saw_;  // Next sawtooth sample
+  float filter_state_;     // Filter state (for low-pass filtering)
+  float gain_;             // Current gain (for interpolation)
+  float gain_saw_;         // Current saw gain (for interpolation)
 
   DISALLOW_COPY_AND_ASSIGN(StringSynthOscillator);
 };

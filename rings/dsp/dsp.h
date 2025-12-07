@@ -36,9 +36,9 @@
 
 namespace rings {
   
-static const float kSampleRate = 48000.0f;
-const float a3 = 440.0f / kSampleRate;
-const size_t kMaxBlockSize = 24;
+static const float kSampleRate = 48000.0f;  // Fixed sample rate: 48kHz (Rings DSP runs at fixed rate)
+const float a3 = 440.0f / kSampleRate;      // Normalized A3 frequency (440 Hz / 48kHz = 0.009167)
+const size_t kMaxBlockSize = 24;            // Maximum block size: 24 samples (fixed processing block)
 
 }  // namespace rings
 
